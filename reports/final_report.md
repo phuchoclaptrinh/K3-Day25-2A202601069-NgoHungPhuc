@@ -1,37 +1,4 @@
-from __future__ import annotations
-
-import argparse
-import json
-from pathlib import Path
-from typing import Any
-
-
-def _metric(metrics: dict[str, Any], key: str, default: object = 0) -> object:
-    return metrics.get(key, default)
-
-
-def _slo_met(actual: float, target: float, higher_is_better: bool = True) -> str:
-    passed = actual >= target if higher_is_better else actual <= target
-    return "yes" if passed else "no"
-
-
-def render_report(metrics: dict[str, Any]) -> str:
-    scenarios = metrics.get("scenarios", {})
-    scenario_rows = "\n".join(
-        f"| {name} | Route through fallback/cache without outage | {status} |"
-        for name, status in scenarios.items()
-    )
-    availability = float(_metric(metrics, "availability"))
-    latency_p95 = float(_metric(metrics, "latency_p95_ms"))
-    fallback_rate = float(_metric(metrics, "fallback_success_rate"))
-    cache_rate = float(_metric(metrics, "cache_hit_rate"))
-    recovery_raw = _metric(metrics, "recovery_time_ms", None)
-    recovery_observed = recovery_raw is not None
-    recovery_time = float(recovery_raw or 0.0)
-    recovery_display = f"{recovery_time:.2f}" if recovery_observed else "not observed"
-    recovery_met = _slo_met(recovery_time, 5000, False) if recovery_observed else "n/a"
-
-    return f"""# Day 25 Reliability Final Report
+# Day 25 Reliability Final Report
 
 ## 1. Architecture Summary
 
@@ -70,28 +37,28 @@ returns a static degraded response instead of raising an unhandled error.
 
 | SLI | SLO target | Actual value | Met? |
 |---|---|---:|---|
-| Availability | >= 99% | {availability:.2%} | {_slo_met(availability, 0.99)} |
-| Latency P95 | < 2500 ms | {latency_p95:.2f} | {_slo_met(latency_p95, 2500, False)} |
-| Fallback success rate | >= 95% | {fallback_rate:.2%} | {_slo_met(fallback_rate, 0.95)} |
-| Cache hit rate | >= 10% | {cache_rate:.2%} | {_slo_met(cache_rate, 0.10)} |
-| Recovery time | < 5000 ms | {recovery_display} | {recovery_met} |
+| Availability | >= 99% | 100.00% | yes |
+| Latency P95 | < 2500 ms | 311.06 | yes |
+| Fallback success rate | >= 95% | 100.00% | yes |
+| Cache hit rate | >= 10% | 63.67% | yes |
+| Recovery time | < 5000 ms | not observed | n/a |
 
 ## 4. Metrics
 
 | Metric | Value |
 |---|---:|
-| total_requests | {_metric(metrics, "total_requests")} |
-| availability | {availability:.4f} |
-| error_rate | {_metric(metrics, "error_rate")} |
-| latency_p50_ms | {_metric(metrics, "latency_p50_ms")} |
-| latency_p95_ms | {_metric(metrics, "latency_p95_ms")} |
-| latency_p99_ms | {_metric(metrics, "latency_p99_ms")} |
-| fallback_success_rate | {fallback_rate:.4f} |
-| cache_hit_rate | {cache_rate:.4f} |
-| estimated_cost | {_metric(metrics, "estimated_cost")} |
-| estimated_cost_saved | {_metric(metrics, "estimated_cost_saved")} |
-| circuit_open_count | {_metric(metrics, "circuit_open_count")} |
-| recovery_time_ms | {recovery_display} |
+| total_requests | 300 |
+| availability | 1.0000 |
+| error_rate | 0.0 |
+| latency_p50_ms | 239.29 |
+| latency_p95_ms | 311.06 |
+| latency_p99_ms | 320.49 |
+| fallback_success_rate | 1.0000 |
+| cache_hit_rate | 0.6367 |
+| estimated_cost | 0.052494 |
+| estimated_cost_saved | 0.191 |
+| circuit_open_count | 6 |
+| recovery_time_ms | not observed |
 
 ## 5. Cache Comparison
 
@@ -101,11 +68,11 @@ setting `cache.enabled: false` in `configs/default.yaml` and rerunning `make run
 
 | Metric | With cache |
 |---|---:|
-| latency_p50_ms | {_metric(metrics, "latency_p50_ms")} |
-| latency_p95_ms | {_metric(metrics, "latency_p95_ms")} |
-| estimated_cost | {_metric(metrics, "estimated_cost")} |
-| estimated_cost_saved | {_metric(metrics, "estimated_cost_saved")} |
-| cache_hit_rate | {cache_rate:.2%} |
+| latency_p50_ms | 239.29 |
+| latency_p95_ms | 311.06 |
+| estimated_cost | 0.052494 |
+| estimated_cost_saved | 0.191 |
+| cache_hit_rate | 63.67% |
 
 ## 6. Redis Shared Cache
 
@@ -137,7 +104,9 @@ pytest tests/test_redis_cache.py -q
 
 | Scenario | Expected behavior | Observed status |
 |---|---|---|
-{scenario_rows}
+| primary_timeout_100 | Route through fallback/cache without outage | pass |
+| primary_flaky_50 | Route through fallback/cache without outage | pass |
+| all_healthy | Route through fallback/cache without outage | pass |
 
 ## 8. Failure Analysis
 
@@ -155,20 +124,3 @@ LLM-as-judge validation for risky semantic hits.
 1. Move circuit breaker counters to Redis for multi-instance consistency.
 2. Add cache-disabled baseline runs to quantify cost and latency deltas.
 3. Add concurrency/load tests with SLO assertions for P95/P99 latency.
-"""
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--metrics", default="reports/metrics.json")
-    parser.add_argument("--out", default="reports/final_report.md")
-    args = parser.parse_args()
-    metrics = json.loads(Path(args.metrics).read_text(encoding="utf-8"))
-    output = Path(args.out)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_report(metrics), encoding="utf-8")
-    print(f"wrote {args.out}")
-
-
-if __name__ == "__main__":
-    main()
